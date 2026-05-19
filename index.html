@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Google Mars Explorer — Real Terrain</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css">
+    <style>
+        :root {
+            --bg-color: #000000;
+            --ui-bg: rgba(20, 20, 25, 0.75);
+            --ui-border: rgba(255, 255, 255, 0.12);
+            --icon-color: #a0a5b1;
+            --icon-active: #ff6b35;
+            --mars-red: #c1440e;
+            --mars-light: #e07a5f;
+            --accent: #ff6b35;
+            --glass-shadow: 0 8px 32px rgba(0,0,0,0.6);
+            --font-main: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-tap-highlight-color: transparent; }
+        body { font-family: var(--font-main); background: var(--bg-color); overflow: hidden; width: 100vw; height: 100vh; color: #e8eaed; }
+
+        /* Loading Screen */
+        #loader {
+            position: fixed; inset: 0; z-index: 9999;
+            background: #000; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; transition: opacity 0.8s;
+        }
+        #loader.hidden { opacity: 0; pointer-events: none; }
+        .loader-ring {
+            width: 80px; height: 80px; border: 3px solid rgba(255,107,53,0.2);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .loader-text { margin-top: 24px; font-size: 14px; letter-spacing: 3px; text-transform: uppercase; color: var(--icon-color); }
+        .loader-progress { width: 200px; height: 2px; background: rgba(255,255,255,0.1); margin-top: 12px; border-radius: 1px; overflow: hidden; }
+        .loader-bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.3s; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; background: #000; cursor: crosshair; }
+
+        .ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
+        .interactive { pointer-events: auto; cursor: pointer; backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%); }
+
+        /* Top Bar */
+        .top-bar { display: flex; padding: 16px; gap: 12px; align-items: center; }
+        .search-box { 
+            flex-grow: 1; background: var(--ui-bg); height: 48px; border-radius: 24px; 
+            display: flex; align-items: center; padding: 0 16px; box-shadow: var(--glass-shadow);
+            border: 1px solid var(--ui-border); transition: 0.3s; max-width: 480px; position: relative;
+        }
+        .search-box:focus-within { border-color: var(--accent); box-shadow: 0 4px 24px rgba(255,107,53,0.25); }
+        .search-box svg { width: 20px; height: 20px; fill: var(--icon-color); flex-shrink: 0; }
+        .search-box input { flex-grow: 1; border: none; outline: none; background: transparent; font-size: 15px; margin: 0 12px; color: #e8eaed; width: 100%; font-family: inherit; }
+        .search-box input::placeholder { color: #5f6368; }
+        .profile-pic { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, var(--mars-red), var(--mars-light)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: white; flex-shrink: 0; margin-left: 8px; }
+
+        .autocomplete-list {
+            position: absolute; top: 52px; left: 0; right: 0; background: var(--ui-bg);
+            border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: var(--glass-shadow);
+            max-height: 240px; overflow-y: auto; display: none; z-index: 100;
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        }
+        .autocomplete-item { padding: 12px 16px; cursor: pointer; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; gap: 10px; transition: 0.2s; }
+        .autocomplete-item:hover { background: rgba(255,107,53,0.15); }
+        .autocomplete-item:last-child { border-bottom: none; }
+        .autocomplete-item .loc-type { font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-left: auto; }
+
+        .top-controls { display: flex; gap: 10px; align-items: center; }
+        .map-style-btn { 
+            width: 48px; height: 48px; border-radius: 12px; 
+            background: linear-gradient(135deg, #c1440e 0%, #e07a5f 50%, #f4a261 100%); 
+            box-shadow: var(--glass-shadow); border: 2px solid rgba(255,255,255,0.9);
+            position: relative; overflow: hidden; transition: transform 0.2s;
+        }
+        .map-style-btn:active { transform: scale(0.95); }
+        .layer-indicator { position: absolute; bottom: 2px; right: 2px; width: 8px; height: 8px; background: #00e676; border-radius: 50%; border: 1px solid white; }
+
+        /* Right Controls */
+        .right-buttons { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 10px; }
+        .round-btn { 
+            width: 44px; height: 44px; background: var(--ui-bg); border-radius: 50%; 
+            display: flex; justify-content: center; align-items: center; 
+            box-shadow: var(--glass-shadow); color: var(--icon-color); 
+            font-weight: bold; font-size: 18px; transition: 0.2s; border: 1px solid var(--ui-border);
+        }
+        .round-btn:hover { background: rgba(255,255,255,0.1); color: white; }
+        .round-btn:active { transform: scale(0.9); }
+        .round-btn.active { color: var(--accent); border-color: var(--accent); }
+        .round-btn svg { width: 22px; height: 22px; fill: currentColor; }
+        .compass-btn svg { width: 28px; height: 28px; }
+        .compass-red { fill: #ea4335; }
+        .compass-grey { fill: #bdc1c6; }
+
+        .zoom-group { 
+            background: var(--ui-bg); border-radius: 22px; display: flex; flex-direction: column; 
+            box-shadow: var(--glass-shadow); overflow: hidden; pointer-events: auto; border: 1px solid var(--ui-border);
+        }
+        .zoom-btn { width: 44px; height: 44px; display: flex; justify-content: center; align-items: center; font-size: 22px; color: var(--icon-color); cursor: pointer; transition: 0.2s; }
+        .zoom-btn:hover { background: rgba(255,255,255,0.08); color: white; }
+        .zoom-btn:active { background-color: rgba(255,255,255,0.15); }
+        .zoom-divider { width: 60%; height: 1px; background: var(--ui-border); margin: 0 auto; }
+
+        /* Bottom Nav */
+        .bottom-nav-container { padding: 16px; display: flex; justify-content: center; }
+        .bottom-nav { 
+            background: var(--ui-bg); height: 56px; border-radius: 28px; 
+            display: flex; align-items: center; padding: 0 28px; gap: 32px; 
+            box-shadow: var(--glass-shadow); border: 1px solid var(--ui-border);
+        }
+        .nav-item { display: flex; justify-content: center; align-items: center; transition: 0.3s; position: relative; cursor: pointer; padding: 8px; }
+        .nav-item svg { width: 24px; height: 24px; fill: var(--icon-color); transition: 0.3s; }
+        .nav-item:hover svg { fill: white; }
+        .nav-item.active { transform: scale(1.1); }
+        .nav-item.active svg { fill: var(--accent); }
+        .nav-item .nav-label { position: absolute; bottom: -18px; font-size: 10px; letter-spacing: 0.5px; opacity: 0; transition: 0.3s; color: var(--accent); white-space: nowrap; }
+        .nav-item.active .nav-label { opacity: 1; }
+
+        /* Coordinate Tooltip */
+        #coord-tooltip {
+            position: absolute; background: var(--ui-bg); padding: 6px 12px; border-radius: 8px;
+            font-size: 12px; pointer-events: none; opacity: 0; transition: opacity 0.2s;
+            border: 1px solid var(--ui-border); box-shadow: var(--glass-shadow);
+            font-family: 'Courier New', monospace; letter-spacing: 0.5px; z-index: 20;
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        }
+
+        /* Info Sidebar */
+        #info-sidebar {
+            position: absolute; right: -380px; top: 80px; width: 340px; max-height: calc(100vh - 160px);
+            background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 16px 0 0 16px;
+            box-shadow: var(--glass-shadow); transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: auto; overflow-y: auto; z-index: 30; backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+        #info-sidebar.open { right: 0; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--ui-border); display: flex; justify-content: space-between; align-items: center; }
+        .sidebar-title { font-size: 18px; font-weight: 600; color: white; }
+        .sidebar-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--ui-border); background: transparent; color: var(--icon-color); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .sidebar-close:hover { background: rgba(255,255,255,0.1); color: white; }
+        .sidebar-content { padding: 20px; }
+        .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
+        .info-label { color: var(--icon-color); }
+        .info-value { color: white; font-weight: 500; }
+        .info-desc { font-size: 13px; line-height: 1.6; color: #b0b5c3; margin-top: 12px; }
+        .info-image { width: 100%; height: 160px; border-radius: 12px; background: linear-gradient(135deg, #2a1f1d, #1a1512); margin-bottom: 16px; display: flex; align-items: center; justify-content: center; color: var(--icon-color); font-size: 12px; overflow: hidden; position: relative; }
+        .info-image::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.6), transparent); }
+        .fly-btn { 
+            width: 100%; padding: 12px; margin-top: 16px; background: var(--accent); color: white; 
+            border: none; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 14px;
+            transition: 0.2s; font-family: inherit;
+        }
+        .fly-btn:hover { background: #ff8a65; transform: translateY(-1px); }
+        .fly-btn:active { transform: translateY(0); }
+
+        /* Time Slider */
+        .time-control {
+            position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%);
+            background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 24px;
+            padding: 8px 20px; display: flex; align-items: center; gap: 12px;
+            box-shadow: var(--glass-shadow); pointer-events: auto; opacity: 0; transition: opacity 0.3s;
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        }
+        .time-control.visible { opacity: 1; }
+        .time-control input[type=range] { width: 140px; accent-color: var(--accent); }
+        .time-label { font-size: 12px; color: var(--icon-color); white-space: nowrap; }
+
+        /* Measurement Overlay */
+        #measure-overlay {
+            position: absolute; top: 80px; left: 16px; background: var(--ui-bg);
+            border: 1px solid var(--ui-border); border-radius: 12px; padding: 12px 16px;
+            box-shadow: var(--glass-shadow); pointer-events: auto; font-size: 13px;
+            opacity: 0; transition: opacity 0.3s; backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+        #measure-overlay.active { opacity: 1; }
+
+        /* Notification */
+        .toast-title { color: var(--accent) !important; font-weight: 600 !important; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+
+        @media (max-width: 768px) {
+            .search-box { max-width: none; }
+            #info-sidebar { width: 100%; right: -100%; top: auto; bottom: 80px; max-height: 50vh; border-radius: 16px 16px 0 0; }
+            .right-buttons { right: 10px; gap: 8px; }
+            .bottom-nav { gap: 20px; padding: 0 20px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Loading Screen -->
+    <div id="loader">
+        <div class="loader-ring"></div>
+        <div class="loader-text">Initializing Terrain Engine</div>
+        <div class="loader-progress"><div class="loader-bar" id="loaderBar"></div></div>
+    </div>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- Coordinate Tooltip -->
+    <div id="coord-tooltip">00°00'00"N 000°00'00"E</div>
+
+    <!-- Info Sidebar -->
+    <div id="info-sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-title" id="sidebarTitle">Location</div>
+            <button class="sidebar-close" onclick="closeSidebar()">✕</button>
+        </div>
+        <div class="sidebar-content" id="sidebarContent">
+            <div class="info-image">No Image Available</div>
+            <div class="info-desc">Select a location to view details.</div>
+        </div>
+    </div>
+
+    <!-- Measurement Overlay -->
+    <div id="measure-overlay">
+        <div style="font-weight: 600; margin-bottom: 4px;">📏 Distance Tool</div>
+        <div style="color: var(--icon-color); font-size: 12px;">Click two points on the surface</div>
+        <div id="measure-result" style="margin-top: 8px; color: var(--accent); font-weight: 600; font-size: 16px;">—</div>
+        <button onclick="clearMeasurement()" style="margin-top: 8px; background: transparent; border: 1px solid var(--ui-border); color: var(--icon-color); padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit;">Clear</button>
+    </div>
+
+    <!-- Time Control -->
+    <div class="time-control" id="timeControl">
+        <span class="time-label">☀️ Sun</span>
+        <input type="range" min="0" max="360" value="45" id="sunSlider" oninput="updateSunPosition(this.value)">
+        <span class="time-label" id="sunTime">06:00</span>
+    </div>
+
+    <!-- UI Overlay -->
+    <div class="ui-layer">
+        <div class="top-bar">
+            <div class="search-box interactive" onclick="focusSearch()" style="position: relative;">
+                <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                <input type="text" id="searchInput" placeholder="Search craters, mountains, rovers..." autocomplete="off">
+                <div class="profile-pic" onclick="showProfile()">C</div>
+                <div class="autocomplete-list" id="autocompleteList"></div>
+            </div>
+            <div class="top-controls">
+                <div class="map-style-btn interactive" onclick="cycleMapLayer()" title="Map Layer">
+                    <div class="layer-indicator"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-buttons">
+            <div class="round-btn compass-btn interactive" onclick="resetNorth()" title="Reset North">
+                <svg viewBox="0 0 24 24">
+                    <polygon points="12,2 17,12 12,12" class="compass-red" />
+                    <polygon points="12,22 17,12 12,12" class="compass-grey" />
+                </svg>
+            </div>
+            <div class="round-btn interactive" onclick="toggleRotation()" id="rotateBtn" title="Auto-Rotate">
+                <svg viewBox="0 0 24 24"><path d="M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8c-.45-.83-.7-1.79-.7-2.8 0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.45.83.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z"/></svg>
+            </div>
+            <div class="round-btn interactive" onclick="toggleFullScreen()" id="fsBtn" title="Fullscreen">
+                <svg viewBox="0 0 24 24" id="fsIcon">
+                    <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+                </svg>
+            </div>
+            <div class="round-btn interactive" onclick="locateRover()" title="Locate Perseverance">
+                <svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+            </div>
+            <div class="round-btn interactive" onclick="toggleTimeControl()" title="Time of Day">
+                <svg viewBox="0 0 24 24"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z"/></svg>
+            </div>
+            <div class="zoom-group">
+                <div class="zoom-btn" onclick="zoomCam(-2)">+</div>
+                <div class="zoom-divider"></div>
+                <div class="zoom-btn" onclick="zoomCam(2)">−</div>
+            </div>
+        </div>
+
+        <div class="bottom-nav-container">
+            <div class="bottom-nav interactive">
+                <div class="nav-item active" onclick="activateNav(this, 'explore')">
+                    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                    <span class="nav-label">Explore</span>
+                </div>
+                <div class="nav-item" onclick="activateNav(this, 'saved')">
+                    <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                    <span class="nav-label">Saved</span>
+                </div>
+                <div class="nav-item" onclick="activateNav(this, 'measure')">
+                    <svg viewBox="0 0 24 24"><path d="M17.5 10c.83 0 1.5-.67 1.5-1.5S18.33 7 17.5 7 16 7.67 16 8.5 16.67 10 17.5 10zm-11 4C5.67 14 5 14.67 5 15.5S5.67 17 6.5 17 8 16.33 8 15.5 7.33 14 6.5 14zm6.85-5.38l-4.47 5.61 1.56 1.25 4.47-5.61-1.56-1.25z"/></svg>
+                    <span class="nav-label">Measure</span>
+                </div>
+                <div class="nav-item" onclick="activateNav(this, 'layers')">
+                    <svg viewBox="0 0 24 24"><path d="M12 2l-11 6 11 6 11-6-11-6zm0 13.5l-9.5-5.18L12 5.25l9.5 5.07L12 15.5zM12 17.25l-9.5-5.18L12 7l9.5 5.07L12 17.25z"/></svg>
+                    <span class="nav-label">Layers</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js"></script>
+
+    <script>
+        // ==================== CONFIGURATION ====================
+        const CONFIG = {
+            marsRadius: 5,
+            minDistance: 5.4,
+            maxDistance: 40,
+            rotationSpeed: 0.0005,
+            autoRotate: true,
+            currentLayer: 0,
+            layers: ['Visual', 'Elevation', 'Geological', 'Thermal']
+        };
+
+        // ==================== MARS LOCATIONS DATABASE ====================
+        const MARS_LOCATIONS = [
+            { name: "Olympus Mons", lat: 18.65, lon: -133.8, type: "Mountain", desc: "The largest volcano in the solar system. It stands 21.9 km high and is about 600 km in diameter.", height: "21.9 km" },
+            { name: "Valles Marineris", lat: -13.9, lon: -59.2, type: "Canyon", desc: "A vast canyon system running along the Martian equator. Over 4,000 km long and up to 7 km deep.", length: "4,000 km" },
+            { name: "Gale Crater", lat: -5.4, lon: 137.8, type: "Crater", desc: "Home to NASA's Curiosity Rover since 2012. Contains Mount Sharp in its center.", diameter: "154 km" },
+            { name: "Jezero Crater", lat: 18.38, lon: 77.58, type: "Crater", desc: "Landing site of Perseverance Rover. An ancient lake bed with a preserved river delta.", diameter: "49 km" },
+            { name: "Hellas Planitia", lat: -42.4, lon: 70.5, type: "Basin", desc: "One of the largest impact basins in the solar system, 2,300 km in diameter and 7 km deep.", diameter: "2,300 km" },
+            { name: "Arsia Mons", lat: -8.4, lon: -120.1, type: "Mountain", desc: "One of the three Tharsis Montes volcanoes. Extinct shield volcano with collapsed caldera.", height: "17.8 km" },
+            { name: "Pavonis Mons", lat: 1.48, lon: -112.58, type: "Mountain", desc: "The middle volcano of the Tharsis Montes chain, located directly on the Martian equator.", height: "14.1 km" },
+            { name: "Ascraeus Mons", lat: 11.9, lon: -104.3, type: "Mountain", desc: "Northernmost of the Tharsis Montes. The tallest at 18.2 km with complex caldera structure.", height: "18.2 km" },
+            { name: "Utopia Planitia", lat: 46.7, lon: 117.5, type: "Plain", desc: "Large flat plain in the northern hemisphere. Landing site of Viking 2 and Zhurong rover.", note: "Flat terrain" },
+            { name: "Meridiani Planum", lat: -2.0, lon: -5.5, type: "Plain", desc: "Home to Opportunity Rover (2004-2018). Rich in gray hematite, suggesting past water.", diameter: "N/A" },
+            { name: "Gusev Crater", lat: -14.6, lon: 175.5, type: "Crater", desc: "Landing site of Spirit Rover. Thought to be an ancient lake bed fed by Ma'adim Vallis.", diameter: "166 km" },
+            { name: "Cydonia", lat: 40.75, lon: -9.46, type: "Region", desc: "Region famous for the 'Face on Mars' mesa and pyramid-shaped formations.", note: "Geological formations" },
+            { name: "North Polar Ice Cap", lat: 87.0, lon: 0, type: "Ice", desc: "Permanent water ice and dry ice (frozen CO2) cap. Seasonal changes create dramatic patterns.", note: "Seasonal" },
+            { name: "South Polar Ice Cap", lat: -87.0, lon: 0, type: "Ice", desc: "Composed mainly of water ice with a thin layer of dry ice. Contains deep chasms.", note: "Permanent" },
+            { name: "Perseverance Rover", lat: 18.4447, lon: 77.4508, type: "Rover", desc: "NASA's Mars 2020 mission rover, actively exploring Jezero Crater since February 2021.", status: "Active" },
+            { name: "Curiosity Rover", lat: -5.4, lon: 137.8, type: "Rover", desc: "NASA's car-sized rover exploring Gale Crater since August 2012.", status: "Active" }
+        ];
+
+        // ==================== THREE.JS SETUP ====================
+        const canvasContainer = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 5000);
+        camera.position.set(0, 0, 16);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        canvasContainer.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enablePan = false;
+        controls.minDistance = CONFIG.minDistance;
+        controls.maxDistance = CONFIG.maxDistance;
+        controls.rotateSpeed = 0.4;
+        controls.zoomSpeed = 1.2;
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.autoRotate = CONFIG.autoRotate;
+        controls.autoRotateSpeed = 0.8;
+
+        // ==================== LOADING MANAGER ====================
+        const loadingManager = new THREE.LoadingManager();
+        const loaderBar = document.getElementById('loaderBar');
+        const loader = document.getElementById('loader');
+
+        loadingManager.onProgress = (url, loaded, total) => {
+            const progress = (loaded / total) * 100;
+            loaderBar.style.width = progress + '%';
+        };
+        loadingManager.onLoad = () => {
+            setTimeout(() => loader.classList.add('hidden'), 800);
+        };
+
+        const textureLoader = new THREE.TextureLoader(loadingManager);
+        textureLoader.setCrossOrigin('anonymous');
+
+        // ==================== STARFIELD ====================
+        function createStarfield() {
+            const geometry = new THREE.BufferGeometry();
+            const count = 6000;
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            const sizes = new Float32Array(count);
+
+            const color1 = new THREE.Color(0xffffff);
+            const color2 = new THREE.Color(0xffaa77);
+            const color3 = new THREE.Color(0x77aaff);
+
+            for (let i = 0; i < count; i++) {
+                const r = 300 + Math.random() * 700;
+                const theta = 2 * Math.PI * Math.random();
+                const phi = Math.acos(2 * Math.random() - 1);
+
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+                positions[i * 3 + 2] = r * Math.cos(phi);
+
+                const rand = Math.random();
+                const c = rand < 0.7 ? color1 : (rand < 0.9 ? color2 : color3);
+                colors[i * 3] = c.r;
+                colors[i * 3 + 1] = c.g;
+                colors[i * 3 + 2] = c.b;
+
+                sizes[i] = 0.5 + Math.random() * 1.5;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+            const material = new THREE.PointsMaterial({
+                size: 1.2,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9,
+                sizeAttenuation: true
+            });
+
+            return new THREE.Points(geometry, material);
+        }
+        scene.add(createStarfield());
+
+        // ==================== MARS ====================
+        const marsGeometry = new THREE.SphereGeometry(CONFIG.marsRadius, 512, 256);
+
+        const marsMaterial = new THREE.MeshStandardMaterial({
+            color: 0xc1440e,
+            roughness: 0.92,
+            metalness: 0.05,
+            displacementScale: 0.15,
+            displacementBias: -0.05
+        });
+
+        const mars = new THREE.Mesh(marsGeometry, marsMaterial);
+        mars.castShadow = true;
+        mars.receiveShadow = true;
+        scene.add(mars);
+
+        // Textures
+        const colorTexture = textureLoader.load(
+            'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/mars_1k_color.jpg',
+            (tex) => {
+                marsMaterial.map = tex;
+                marsMaterial.displacementMap = tex;
+                marsMaterial.color.setHex(0xffffff);
+                marsMaterial.needsUpdate = true;
+            }
+        );
+
+        const normalTexture = textureLoader.load(
+            'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/mars_1k_normal.jpg',
+            (tex) => {
+                marsMaterial.normalMap = tex;
+                marsMaterial.normalScale.set(3.0, 3.0);
+                marsMaterial.needsUpdate = true;
+            }
+        );
+
+        // ==================== ATMOSPHERE GLOW ====================
+        const atmosphereGeometry = new THREE.SphereGeometry(CONFIG.marsRadius + 0.2, 64, 64);
+        const atmosphereMaterial = new THREE.ShaderMaterial({
+            transparent: true,
+            side: THREE.BackSide,
+            uniforms: {
+                c: { value: 0.6 },
+                p: { value: 4.0 },
+                glowColor: { value: new THREE.Color(0xc1440e) },
+                viewVector: { value: camera.position }
+            },
+            vertexShader: `
+                uniform vec3 viewVector;
+                varying float intensity;
+                void main() {
+                    vec3 vNormal = normalize(normalMatrix * normal);
+                    vec3 vNormel = normalize(normalMatrix * viewVector);
+                    intensity = pow(0.6 - dot(vNormal, vNormel), 4.0);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 glowColor;
+                varying float intensity;
+                void main() {
+                    vec3 glow = glowColor * intensity;
+                    gl_FragColor = vec4(glow, intensity * 0.6);
+                }
+            `
+        });
+        const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+        scene.add(atmosphere);
+
+        // ==================== DUST PARTICLES ====================
+        const dustCount = 800;
+        const dustGeometry = new THREE.BufferGeometry();
+        const dustPositions = new Float32Array(dustCount * 3);
+        const dustVelocities = [];
+
+        for (let i = 0; i < dustCount; i++) {
+            const r = CONFIG.marsRadius + 0.5 + Math.random() * 3;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI;
+            dustPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+            dustPositions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+            dustPositions[i * 3 + 2] = r * Math.cos(phi);
+            dustVelocities.push({
+                x: (Math.random() - 0.5) * 0.002,
+                y: (Math.random() - 0.5) * 0.002,
+                z: (Math.random() - 0.5) * 0.002
+            });
+        }
+        dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+        const dustMaterial = new THREE.PointsMaterial({
+            color: 0xd4a373,
+            size: 0.08,
+            transparent: true,
+            opacity: 0.4,
+            sizeAttenuation: true
+        });
+        const dustSystem = new THREE.Points(dustGeometry, dustMaterial);
+        scene.add(dustSystem);
+
+        // ==================== MOONS ====================
+        function createMoon(radius, distance, speed, color, name) {
+            const geometry = new THREE.SphereGeometry(radius, 32, 32);
+            const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.9 });
+            const mesh = new THREE.Mesh(geometry, material);
+
+            // Orbit trail
+            const trailGeometry = new THREE.BufferGeometry();
+            const trailPoints = [];
+            for (let i = 0; i <= 64; i++) {
+                const angle = (i / 64) * Math.PI * 2;
+                trailPoints.push(new THREE.Vector3(
+                    Math.cos(angle) * distance,
+                    0,
+                    Math.sin(angle) * distance
+                ));
+            }
+            trailGeometry.setFromPoints(trailPoints);
+            const trailMaterial = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.15 });
+            const trail = new THREE.Line(trailGeometry, trailMaterial);
+            scene.add(trail);
+
+            return { mesh, distance, speed, angle: Math.random() * Math.PI * 2, name };
+        }
+
+        const phobos = createMoon(0.08, 9, 0.005, 0x888888, "Phobos");
+        const deimos = createMoon(0.05, 13, 0.003, 0x999999, "Deimos");
+        scene.add(phobos.mesh);
+        scene.add(deimos.mesh);
+
+        // ==================== LIGHTING ====================
+        scene.add(new THREE.AmbientLight(0x222222, 0.4));
+
+        const sunLight = new THREE.DirectionalLight(0xfff0dd, 2.0);
+        sunLight.position.set(20, 5, 10);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 50;
+        sunLight.shadow.bias = -0.0001;
+        scene.add(sunLight);
+
+        const fillLight = new THREE.DirectionalLight(0x4455aa, 0.3);
+        fillLight.position.set(-10, 0, -10);
+        scene.add(fillLight);
+
+        // ==================== MARKERS SYSTEM ====================
+        const markersGroup = new THREE.Group();
+        scene.add(markersGroup);
+
+        function latLonToVector3(lat, lon, radius) {
+            const phi = (90 - lat) * (Math.PI / 180);
+            const theta = (lon + 180) * (Math.PI / 180);
+            return new THREE.Vector3(
+                -radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.cos(phi),
+                radius * Math.sin(phi) * Math.sin(theta)
+            );
+        }
+
+        function createMarker(location) {
+            const pos = latLonToVector3(location.lat, location.lon, CONFIG.marsRadius);
+            const group = new THREE.Group();
+            group.position.copy(pos);
+            group.lookAt(0, 0, 0);
+
+            // Pin
+            const pinGeometry = new THREE.SphereGeometry(0.08, 16, 16);
+            const pinMaterial = new THREE.MeshBasicMaterial({ color: 0xff6b35 });
+            const pin = new THREE.Mesh(pinGeometry, pinMaterial);
+            pin.position.y = 0.15;
+            group.add(pin);
+
+            // Ring
+            const ringGeometry = new THREE.RingGeometry(0.12, 0.15, 32);
+            const ringMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xff6b35, 
+                transparent: true, 
+                opacity: 0.6,
+                side: THREE.DoubleSide
+            });
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+            ring.rotation.x = Math.PI / 2;
+            ring.position.y = 0.02;
+            group.add(ring);
+
+            // Pulse animation data
+            group.userData = { 
+                location, 
+                ring, 
+                pin, 
+                baseScale: 1,
+                time: Math.random() * Math.PI * 2 
+            };
+
+            markersGroup.add(group);
+        }
+
+        MARS_LOCATIONS.forEach(createMarker);
+
+        // ==================== RAYCASTING & INTERACTION ====================
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const coordTooltip = document.getElementById('coord-tooltip');
+        let hoveredMarker = null;
+        let measureMode = false;
+        let measurePoints = [];
+        let measureLine = null;
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Update tooltip position
+            coordTooltip.style.left = (event.clientX + 15) + 'px';
+            coordTooltip.style.top = (event.clientY + 15) + 'px';
+
+            // Raycast for surface coordinates
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(mars);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                const lat = 90 - (Math.acos(point.y / CONFIG.marsRadius) * 180 / Math.PI);
+                const lon = ((Math.atan2(point.z, -point.x) * 180 / Math.PI) + 180) % 360 - 180;
+
+                const latStr = Math.abs(lat).toFixed(2) + "°" + (lat >= 0 ? "N" : "S");
+                const lonStr = Math.abs(lon).toFixed(2) + "°" + (lon >= 0 ? "E" : "W");
+                coordTooltip.textContent = `${latStr}  ${lonStr}`;
+                coordTooltip.style.opacity = 1;
+                canvasContainer.style.cursor = measureMode ? 'crosshair' : 'pointer';
+            } else {
+                coordTooltip.style.opacity = 0;
+                canvasContainer.style.cursor = 'default';
+            }
+
+            // Check markers hover
+            const markerIntersects = raycaster.intersectObjects(markersGroup.children, true);
+            if (markerIntersects.length > 0) {
+                let group = markerIntersects[0].object.parent;
+                while (group && !group.userData.location) group = group.parent;
+                if (group && group.userData.location) {
+                    hoveredMarker = group;
+                    canvasContainer.style.cursor = 'pointer';
+                }
+            } else {
+                hoveredMarker = null;
+            }
+        }
+
+        function onClick(event) {
+            if (measureMode) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(mars);
+                if (intersects.length > 0) {
+                    addMeasurePoint(intersects[0].point);
+                }
+                return;
+            }
+
+            if (hoveredMarker) {
+                const loc = hoveredMarker.userData.location;
+                showLocationInfo(loc);
+                flyToLocation(loc);
+            }
+        }
+
+        canvasContainer.addEventListener('mousemove', onMouseMove);
+        canvasContainer.addEventListener('click', onClick);
+
+        // ==================== MEASUREMENT TOOL ====================
+        function addMeasurePoint(point) {
+            measurePoints.push(point);
+
+            // Visual marker
+            const dotGeometry = new THREE.SphereGeometry(0.06, 16, 16);
+            const dotMaterial = new THREE.MeshBasicMaterial({ color: 0x00e676 });
+            const dot = new THREE.Mesh(dotGeometry, dotMaterial);
+            dot.position.copy(point);
+            dot.position.normalize().multiplyScalar(CONFIG.marsRadius + 0.05);
+            scene.add(dot);
+            measurePoints[measurePoints.length - 1].visual = dot;
+
+            if (measurePoints.length === 2) {
+                const dist = measurePoints[0].distanceTo(measurePoints[1]);
+                const surfaceDist = CONFIG.marsRadius * Math.acos(
+                    Math.max(-1, Math.min(1, 
+                        (measurePoints[0].x * measurePoints[1].x + 
+                         measurePoints[0].y * measurePoints[1].y + 
+                         measurePoints[0].z * measurePoints[1].z) / (CONFIG.marsRadius * CONFIG.marsRadius)
+                    ))
+                );
+                const km = (surfaceDist * 1069).toFixed(1); // Scale factor for visual
+
+                document.getElementById('measure-result').textContent = km + ' km';
+
+                // Draw line
+                const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                    measurePoints[0].clone().normalize().multiplyScalar(CONFIG.marsRadius + 0.06),
+                    measurePoints[1].clone().normalize().multiplyScalar(CONFIG.marsRadius + 0.06)
+                ]);
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00e676, linewidth: 2 });
+                measureLine = new THREE.Line(lineGeometry, lineMaterial);
+                scene.add(measureLine);
+
+                showToast('Measurement Complete', `Distance: ${km} km`);
+            } else if (measurePoints.length > 2) {
+                clearMeasurement();
+                addMeasurePoint(point);
+            }
+        }
+
+        function clearMeasurement() {
+            measurePoints.forEach(p => { if (p.visual) scene.remove(p.visual); });
+            measurePoints = [];
+            if (measureLine) { scene.remove(measureLine); measureLine = null; }
+            document.getElementById('measure-result').textContent = '—';
+        }
+
+        // ==================== CAMERA ANIMATIONS ====================
+        let flyTarget = null;
+        let flyStartPos = null;
+        let flyStartTime = 0;
+        const flyDuration = 2000;
+
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        function flyToLocation(location) {
+            const targetPos = latLonToVector3(location.lat, location.lon, CONFIG.marsRadius);
+            const offset = targetPos.clone().normalize().multiplyScalar(8);
+            const endPos = targetPos.clone().add(offset);
+
+            flyStartPos = camera.position.clone();
+            flyTarget = { position: endPos, lookAt: targetPos };
+            flyStartTime = performance.now();
+
+            controls.enabled = false;
+        }
+
+        function updateFlyAnimation() {
+            if (!flyTarget) return;
+
+            const elapsed = performance.now() - flyStartTime;
+            const progress = Math.min(elapsed / flyDuration, 1);
+            const eased = easeInOutCubic(progress);
+
+            camera.position.lerpVectors(flyStartPos, flyTarget.position, eased);
+            controls.target.lerp(flyTarget.lookAt, eased * 0.1);
+
+            if (progress >= 1) {
+                flyTarget = null;
+                controls.enabled = true;
+                controls.target.copy(latLonToVector3(
+                    MARS_LOCATIONS.find(l => l.name === document.getElementById('sidebarTitle').textContent)?.lat || 0,
+                    MARS_LOCATIONS.find(l => l.name === document.getElementById('sidebarTitle').textContent)?.lon || 0,
+                    CONFIG.marsRadius
+                ));
+            }
+        }
+
+        // ==================== UI LOGIC ====================
+        iziToast.settings({ 
+            position: 'topCenter', 
+            theme: 'dark', 
+            backgroundColor: 'rgba(20,20,25,0.9)', 
+            progressBarColor: 'var(--accent)', 
+            timeout: 3000, 
+            transitionIn: 'fadeInDown', 
+            transitionOut: 'fadeOutUp',
+            titleColor: '#ff6b35'
+        });
+
+        function showToast(title, message) { 
+            iziToast.show({ title: title, message: message }); 
+        }
+
+        const searchInput = document.getElementById('searchInput');
+        const autocompleteList = document.getElementById('autocompleteList');
+
+        function focusSearch() { searchInput.focus(); }
+
+        searchInput.addEventListener('input', function() {
+            const val = this.value.toLowerCase();
+            autocompleteList.innerHTML = '';
+            if (val.length < 1) { autocompleteList.style.display = 'none'; return; }
+
+            const matches = MARS_LOCATIONS.filter(l => l.name.toLowerCase().includes(val));
+            if (matches.length === 0) { autocompleteList.style.display = 'none'; return; }
+
+            matches.forEach(loc => {
+                const div = document.createElement('div');
+                div.className = 'autocomplete-item';
+                div.innerHTML = `<span>${loc.name}</span><span class="loc-type">${loc.type}</span>`;
+                div.onclick = () => {
+                    searchInput.value = loc.name;
+                    autocompleteList.style.display = 'none';
+                    showLocationInfo(loc);
+                    flyToLocation(loc);
+                };
+                autocompleteList.appendChild(div);
+            });
+            autocompleteList.style.display = 'block';
+        });
+
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && this.value.trim() !== '') {
+                this.blur();
+                const loc = MARS_LOCATIONS.find(l => l.name.toLowerCase().includes(this.value.toLowerCase()));
+                if (loc) {
+                    showLocationInfo(loc);
+                    flyToLocation(loc);
+                    showToast('Navigation', `Approaching ${loc.name}`);
+                } else {
+                    Swal.fire({
+                        title: 'Location Not Found', 
+                        text: `${this.value} is not in the Mars database.`,
+                        icon: 'question',
+                        background: '#111', color: '#fff',
+                        confirmButtonText: 'Continue Exploring', 
+                        confirmButtonColor: 'var(--accent)'
+                    });
+                }
+                autocompleteList.style.display = 'none';
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.search-box')) autocompleteList.style.display = 'none';
+        });
+
+        function showLocationInfo(loc) {
+            document.getElementById('sidebarTitle').textContent = loc.name;
+            const content = document.getElementById('sidebarContent');
+
+            let details = '';
+            if (loc.height) details += `<div class="info-row"><span class="info-label">Height</span><span class="info-value">${loc.height}</span></div>`;
+            if (loc.diameter) details += `<div class="info-row"><span class="info-label">Diameter</span><span class="info-value">${loc.diameter}</span></div>`;
+            if (loc.length) details += `<div class="info-row"><span class="info-label">Length</span><span class="info-value">${loc.length}</span></div>`;
+            if (loc.status) details += `<div class="info-row"><span class="info-label">Status</span><span class="info-value" style="color:#00e676">${loc.status}</span></div>`;
+
+            details += `<div class="info-row"><span class="info-label">Latitude</span><span class="info-value">${loc.lat}°</span></div>`;
+            details += `<div class="info-row"><span class="info-label">Longitude</span><span class="info-value">${loc.lon}°</span></div>`;
+            details += `<div class="info-row"><span class="info-label">Type</span><span class="info-value">${loc.type}</span></div>`;
+
+            content.innerHTML = `
+                <div class="info-image" style="background: linear-gradient(135deg, #3a1f1a, #1a1512); display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--mars-light); font-weight: 600;">
+                    ${loc.type.toUpperCase()}
+                </div>
+                ${details}
+                <div class="info-desc">${loc.desc}</div>
+                <button class="fly-btn" onclick="flyToLocation(MARS_LOCATIONS.find(l => l.name === '${loc.name}'))">🚀 Fly to Location</button>
+            `;
+            document.getElementById('info-sidebar').classList.add('open');
+        }
+
+        function closeSidebar() {
+            document.getElementById('info-sidebar').classList.remove('open');
+        }
+
+        function showProfile() {
+            Swal.fire({ 
+                title: 'Commander Uplink', 
+                html: '<div style="text-align:left"><p><strong>Status:</strong> Nominal</p><p><strong>Oxygen:</strong> 98%</p><p><strong>Suit Temp:</strong> -63°C</p><p><strong>Radiation:</strong> 0.67 mSv/day</p></div>', 
+                imageUrl: 'https://ui-avatars.com/api/?name=Commander&background=c1440e&color=fff&size=100', 
+                background: '#111', color: '#fff', 
+                confirmButtonColor: 'var(--accent)' 
+            });
+        }
+
+        function resetNorth() { 
+            showToast('Compass', 'Re-orienting to Martian north pole'); 
+            const startPos = camera.position.clone();
+            const endPos = new THREE.Vector3(0, 0, 16);
+            flyStartPos = startPos;
+            flyTarget = { position: endPos, lookAt: new THREE.Vector3(0,0,0) };
+            flyStartTime = performance.now();
+            controls.enabled = false;
+        }
+
+        function toggleRotation() {
+            controls.autoRotate = !controls.autoRotate;
+            const btn = document.getElementById('rotateBtn');
+            if (controls.autoRotate) {
+                btn.classList.add('active');
+                showToast('Orbit', 'Auto-rotation enabled');
+            } else {
+                btn.classList.remove('active');
+                showToast('Orbit', 'Auto-rotation paused');
+            }
+        }
+
+        function locateRover() {
+            const rover = MARS_LOCATIONS.find(l => l.name === "Perseverance Rover");
+            if (rover) {
+                showLocationInfo(rover);
+                flyToLocation(rover);
+                showToast('Telemetry', 'Perseverance located at Jezero Crater');
+            }
+        }
+
+        function zoomCam(amount) {
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            camera.position.add(direction.multiplyScalar(amount));
+            const dist = camera.position.length();
+            if (dist < controls.minDistance) camera.position.setLength(controls.minDistance);
+            if (dist > controls.maxDistance) camera.position.setLength(controls.maxDistance);
+        }
+
+        function toggleFullScreen() {
+            const doc = window.document;
+            const docEl = doc.documentElement;
+            const fsIcon = document.getElementById('fsIcon');
+            if (!doc.fullscreenElement) {
+                docEl.requestFullscreen();
+                fsIcon.innerHTML = `<path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>`;
+            } else {
+                doc.exitFullscreen();
+                fsIcon.innerHTML = `<path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>`;
+            }
+        }
+
+        function toggleTimeControl() {
+            document.getElementById('timeControl').classList.toggle('visible');
+        }
+
+        function updateSunPosition(deg) {
+            const rad = deg * Math.PI / 180;
+            const r = 25;
+            sunLight.position.set(Math.cos(rad) * r, Math.sin(rad) * 5 + 2, Math.sin(rad) * r);
+
+            const hour = Math.floor((deg / 360) * 24);
+            const min = Math.floor(((deg / 360) * 24 % 1) * 60);
+            document.getElementById('sunTime').textContent = 
+                String(hour).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+        }
+
+        function cycleMapLayer() {
+            CONFIG.currentLayer = (CONFIG.currentLayer + 1) % CONFIG.layers.length;
+            const layer = CONFIG.layers[CONFIG.currentLayer];
+
+            if (layer === 'Visual') {
+                marsMaterial.color.setHex(0xffffff);
+                marsMaterial.wireframe = false;
+                if (marsMaterial.map) marsMaterial.map.colorSpace = THREE.SRGBColorSpace;
+            } else if (layer === 'Elevation') {
+                marsMaterial.color.setHex(0x888888);
+                marsMaterial.wireframe = false;
+            } else if (layer === 'Geological') {
+                marsMaterial.color.setHex(0x55aa55);
+                marsMaterial.wireframe = false;
+            } else if (layer === 'Thermal') {
+                marsMaterial.color.setHex(0xff4400);
+                marsMaterial.wireframe = false;
+            }
+
+            marsMaterial.needsUpdate = true;
+            showToast('Map Layer', `Switched to ${layer} view`);
+        }
+
+        let activeMode = 'explore';
+
+        function activateNav(element, mode) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            activeMode = mode;
+
+            if (mode === 'measure') {
+                measureMode = true;
+                document.getElementById('measure-overlay').classList.add('active');
+                showToast('Measure Tool', 'Click two points on the surface to measure distance');
+            } else {
+                measureMode = false;
+                document.getElementById('measure-overlay').classList.remove('active');
+                clearMeasurement();
+            }
+
+            if (mode === 'layers') {
+                cycleMapLayer();
+            }
+
+            if (mode === 'explore') {
+                showToast('Explore Mode', 'Surface data synced');
+            }
+            if (mode === 'saved') {
+                showToast('Saved Locations', 'Bookmarked craters loaded');
+            }
+        }
+
+        // ==================== ANIMATION LOOP ====================
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            controls.update();
+            updateFlyAnimation();
+
+            // Update atmosphere shader
+            atmosphereMaterial.uniforms.viewVector.value = camera.position;
+
+            // Animate moons
+            phobos.angle += phobos.speed;
+            phobos.mesh.position.set(
+                Math.cos(phobos.angle) * phobos.distance,
+                Math.sin(phobos.angle * 0.3) * 0.5,
+                Math.sin(phobos.angle) * phobos.distance
+            );
+            phobos.mesh.lookAt(0, 0, 0);
+
+            deimos.angle += deimos.speed;
+            deimos.mesh.position.set(
+                Math.cos(deimos.angle) * deimos.distance,
+                Math.sin(deimos.angle * 0.2) * 0.3,
+                Math.sin(deimos.angle) * deimos.distance
+            );
+
+            // Animate dust
+            const dustPositions = dustSystem.geometry.attributes.position.array;
+            for (let i = 0; i < dustCount; i++) {
+                dustPositions[i * 3] += dustVelocities[i].x;
+                dustPositions[i * 3 + 1] += dustVelocities[i].y;
+                dustPositions[i * 3 + 2] += dustVelocities[i].z;
+
+                // Reset if too far
+                const dist = Math.sqrt(
+                    dustPositions[i*3]**2 + 
+                    dustPositions[i*3+1]**2 + 
+                    dustPositions[i*3+2]**2
+                );
+                if (dist > CONFIG.marsRadius + 5 || dist < CONFIG.marsRadius) {
+                    const r = CONFIG.marsRadius + 0.5 + Math.random() * 3;
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.random() * Math.PI;
+                    dustPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                    dustPositions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+                    dustPositions[i * 3 + 2] = r * Math.cos(phi);
+                }
+            }
+            dustSystem.geometry.attributes.position.needsUpdate = true;
+
+            // Animate markers
+            markersGroup.children.forEach(group => {
+                const data = group.userData;
+                data.time += delta * 2;
+                const scale = data.baseScale + Math.sin(data.time) * 0.2;
+                data.pin.scale.setScalar(scale);
+                data.ring.scale.setScalar(1 + Math.sin(data.time) * 0.3);
+                data.ring.material.opacity = 0.4 + Math.sin(data.time) * 0.2;
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            if (e.key === 'f') toggleFullScreen();
+            if (e.key === 'r') toggleRotation();
+            if (e.key === 'n') resetNorth();
+            if (e.key === 'Escape') closeSidebar();
+        });
+
+        // Initialize
+        document.getElementById('rotateBtn').classList.add('active');
+        animate();
+    </script>
+</body>
+</html>
